@@ -4,7 +4,6 @@ import pandas as pd
 import collections
 import os
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix
 import csv
 
 
@@ -77,32 +76,6 @@ def sentence_to_avg(sentence, word_to_vec_map, wordsAll):
 def findNullRows(df):
     return df.ix[pd.isnull(X_train).any(axis = 1)].index.tolist()
 
-class SimilarityCallback:
-    def run_sim(self):
-        for i in range(valid_size):
-            valid_word = reverse_dictionary[valid_examples[i]]
-            top_k = 8  # number of nearest neighbors
-            sim = self._get_sim(valid_examples[i])
-            nearest = (-sim).argsort()[1:top_k + 1]
-            log_str = 'Nearest to %s:' % valid_word
-            for k in range(top_k):
-                close_word = reverse_dictionary[nearest[k]]
-                log_str = '%s %s,' % (log_str, close_word)
-            print(log_str)
-
-    @staticmethod
-    def _get_sim(valid_word_idx):
-        sim = np.zeros((vocab_size,))
-        in_arr1 = np.zeros((1,))
-        in_arr2 = np.zeros((1,))
-        in_arr1[0,] = valid_word_idx
-        for i in range(vocab_size):
-            in_arr2[0,] = i
-            out = validation_model.predict_on_batch([in_arr1, in_arr2])
-            sim[i] = out
-        return sim
-    
-
 def read_glove_vecs(glove_file):
     with open(glove_file, 'r') as f:
         word_to_vec_map = {}
@@ -133,23 +106,108 @@ def read_glove_vecs_with_index(glove_file):
             i = i + 1
     return words_to_index, index_to_words, word_to_vec_map
 
+# GRADED FUNCTION: sentences_to_indices
+
+def sentences_to_indices(X, word_to_index, max_len):
+    """
+    Converts an array of sentences (strings) into an array of indices corresponding to words in the sentences.
+    The output shape should be such that it can be given to `Embedding()` (described in Figure 4). 
+    
+    Arguments:
+    X -- array of sentences (strings), of shape (m, 1)
+    word_to_index -- a dictionary containing the each word mapped to its index
+    max_len -- maximum number of words in a sentence. You can assume every sentence in X is no longer than this. 
+    
+    Returns:
+    X_indices -- array of indices corresponding to words in the sentences from X, of shape (m, max_len)
+    """
+    
+    m = X.shape[0]                                   # number of training examples
+    
+    ### START CODE HERE ###
+    # Initialize X_indices as a numpy matrix of zeros and the correct shape (≈ 1 line)
+    X_indices = np.zeros((m, max_len))
+    allWords = word_to_index.keys()
+    for i in range(m):                               # loop over training examples
         
-def plot_confusion_matrix(y_actu, y_pred, title='Confusion matrix', cmap=plt.cm.gray_r):
+        # Convert the ith training sentence in lower case and split is into words. You should get a list of words.
+        sentence_words = re.split("[-{}()_#@; |!,\*\n.:/?=]",str(X[i]).lower())
+        
+        # Initialize j to 0
+        j = 0
+        
+        # Loop over the words of sentence_words
+        for w in sentence_words:
+            if w in allWords:
+                # Set the (i,j)th entry of X_indices to the index of the correct word.
+                X_indices[i, j] = word_to_index[w]
+                # Increment j to j + 1
+                j = j + 1
+            if j >= max_len:
+                break
+            
+    ### END CODE HERE ###
     
-    df_confusion = pd.crosstab(y_actu, y_pred.reshape(y_pred.shape[0],), rownames=['Actual'], colnames=['Predicted'], margins=True)
+    return X_indices
+
+# GRADED FUNCTION: pretrained_embedding_layer
+
+def pretrained_embedding_layer(word_to_vec_map, word_to_index):
+    """
+    Creates a Keras Embedding() layer and loads in pre-trained GloVe 50-dimensional vectors.
     
-    df_conf_norm = df_confusion / df_confusion.sum(axis=1)
+    Arguments:
+    word_to_vec_map -- dictionary mapping words to their GloVe vector representation.
+    word_to_index -- dictionary mapping from words to their indices in the vocabulary (400,001 words)
+
+    Returns:
+    embedding_layer -- pretrained layer Keras instance
+    """
     
-    plt.matshow(df_confusion, cmap=cmap) # imshow
-    #plt.title(title)
-    plt.colorbar()
-    tick_marks = np.arange(len(df_confusion.columns))
-    plt.xticks(tick_marks, df_confusion.columns, rotation=45)
-    plt.yticks(tick_marks, df_confusion.index)
-    #plt.tight_layout()
-    plt.ylabel(df_confusion.index.name)
-    plt.xlabel(df_confusion.columns.name)
+    vocab_len = len(word_to_index) + 1                  # adding 1 to fit Keras embedding (requirement)
+    emb_dim = word_to_vec_map["cucumber"].shape[0]      # define dimensionality of your GloVe word vectors (= 50)
     
+    ### START CODE HERE ###
+    # Initialize the embedding matrix as a numpy array of zeros of shape (vocab_len, dimensions of word vectors = emb_dim)
+    emb_matrix = np.zeros((vocab_len, emb_dim))
+    
+    # Set each row "index" of the embedding matrix to be the word vector representation of the "index"th word of the vocabulary
+    for word, index in word_to_index.items():
+        emb_matrix[index, :] = word_to_vec_map[word]
+
+    # Define Keras embedding layer with the correct output/input sizes, make it trainable. Use Embedding(...). Make sure to set trainable=False. 
+    embedding_layer = Embedding(vocab_len, emb_dim, trainable=False)
+    ### END CODE HERE ###
+
+    # Build the embedding layer, it is required before setting the weights of the embedding layer. Do not modify the "None".
+    embedding_layer.build((None,))
+    
+    # Set the weights of the embedding layer to the embedding matrix. Your layer is now pretrained.
+    embedding_layer.set_weights([emb_matrix])
+    
+    return embedding_layer
+
+def tfidfTransform(texts, analyzer = 'word', ngram_range = (1, 1), max_features = None):
+    """
+    perform tf-idf conversion to the list of texts
+    input: texts can be [train_text_list, test_text_list]
+    output: converted textList in sparse matrix form, to view it use .todense()
+    """
+    word_vectorizer = TfidfVectorizer(
+        sublinear_tf=True, #Apply sublinear tf scaling, i.e. replace tf with 1 + log(tf)
+        strip_accents='unicode',
+        analyzer=analyzer,
+        token_pattern=r'\w{1,}',
+        stop_words='english',
+        ngram_range=ngram_range,
+        max_features=max_features)
+    word_vectorizer.fit(all_text)
+    outputs = []
+    for text in texts:
+        outputs.append(word_vectorizer.transform(text))
+    return outputs
+    
+
 
 
 
