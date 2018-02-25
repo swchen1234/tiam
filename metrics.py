@@ -1,0 +1,76 @@
+import pandas as pd
+import numpy as np
+import logging
+from sklearn.metrics import roc_auc_score
+from keras.callbacks import Callback    
+from sklearn.metrics import confusion_matrix
+from matplotlib import pyplot as plt
+
+
+class SimilarityCallback:
+    def run_sim(self):
+        for i in range(valid_size):
+            valid_word = reverse_dictionary[valid_examples[i]]
+            top_k = 8  # number of nearest neighbors
+            sim = self._get_sim(valid_examples[i])
+            nearest = (-sim).argsort()[1:top_k + 1]
+            log_str = 'Nearest to %s:' % valid_word
+            for k in range(top_k):
+                close_word = reverse_dictionary[nearest[k]]
+                log_str = '%s %s,' % (log_str, close_word)
+            print(log_str)
+
+    @staticmethod
+    def _get_sim(valid_word_idx):
+        sim = np.zeros((vocab_size,))
+        in_arr1 = np.zeros((1,))
+        in_arr2 = np.zeros((1,))
+        in_arr1[0,] = valid_word_idx
+        for i in range(vocab_size):
+            in_arr2[0,] = i
+            out = validation_model.predict_on_batch([in_arr1, in_arr2])
+            sim[i] = out
+        return sim
+
+
+class IntervalEvaluation(Callback):
+    def __init__(self, validation_data=(), interval=10):
+        super(Callback, self).__init__()
+
+        self.interval = interval
+        self.X_val, self.y_val = validation_data
+
+    def on_epoch_end(self, epoch, logs={}):
+        if epoch % self.interval == 0:
+            y_pred = self.model.predict_proba(self.X_val, verbose=0)
+            score = roc_auc_score(self.y_val, y_pred)
+            logging.info("interval evaluation - epoch: {:d} - score: {:.6f}".format(epoch, score))
+
+class RocAucEvaluation(Callback):
+    def __init__(self, validation_data=(), interval=1):
+        super(Callback, self).__init__()
+
+        self.interval = interval
+        self.X_val, self.y_val = validation_data
+
+    def on_epoch_end(self, epoch, logs={}):
+        if epoch % self.interval == 0:
+            y_pred = self.model.predict(self.X_val, verbose=0)
+            score = roc_auc_score(self.y_val, y_pred)
+            print("\n ROC-AUC - epoch: %d - score: %.6f \n" % (epoch+1, score))
+
+def plot_confusion_matrix(y_actu, y_pred, title='Confusion matrix', cmap=plt.cm.gray_r):
+    
+    df_confusion = pd.crosstab(y_actu, y_pred.reshape(y_pred.shape[0],), rownames=['Actual'], colnames=['Predicted'], margins=True)
+    
+    df_conf_norm = df_confusion / df_confusion.sum(axis=1)
+    
+    plt.matshow(df_confusion, cmap=cmap) # imshow
+    #plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(len(df_confusion.columns))
+    plt.xticks(tick_marks, df_confusion.columns, rotation=45)
+    plt.yticks(tick_marks, df_confusion.index)
+    #plt.tight_layout()
+    plt.ylabel(df_confusion.index.name)
+    plt.xlabel(df_confusion.columns.name)
